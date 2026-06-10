@@ -1,0 +1,41 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+*.tfvars.json
+!*.auto.tfvars.example
+
+# Python (Lambda functions)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Build artifacts
+*.zip
+dist/
+build/
+
+# Generated reports / scan output — never commit real account data
+*_report.html
+*-results.json
+*.bundle
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
