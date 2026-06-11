@@ -12,6 +12,12 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 5.40.0, < 6.0.0"
     }
+
+    # Packages the custom Config rule Lambdas (data.archive_file).
+    archive = {
+      source  = "hashicorp/archive"
+      version = ">= 2.4.0"
+    }
   }
 }
 
