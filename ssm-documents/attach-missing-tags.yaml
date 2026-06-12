@@ -1,0 +1,115 @@
+# attach-missing-tags — SSM Automation runbook
+#
+# Invoked automatically by AWS Config remediation when the require-backup-tag
+# custom rule marks an EBS volume, RDS instance, or EFS file system
+# NON_COMPLIANT. Attaches every tag from DefaultTagsJson that the resource is
+# missing. Existing tag values are never overwritten.
+#
+# Registered by terraform/remediation-configurations.tf as
+# <project>-attach-missing-tags.
+schemaVersion: '0.3'
+description: >-
+  Attach missing default tags to an EBS volume (vol-...), EFS file system
+  (fs-...), or RDS instance (db-... DbiResourceId, as reported by AWS Config).
+  Tags already present on the resource keep their current values.
+assumeRole: '{{ AutomationAssumeRole }}'
+
+parameters:
+  ResourceId:
+    type: String
+    description: (Required) AWS Config resource id - vol-*, fs-*, or an RDS DbiResourceId (db-*).
+    allowedPattern: ^(vol|fs|db)-[a-zA-Z0-9]{4,40}$
+  DefaultTagsJson:
+    type: String
+    description: (Required) JSON object of tag keys to values to attach when missing, e.g. {"Backup":"true"}.
+    allowedPattern: ^\{.{1,1024}\}$
+  AutomationAssumeRole:
+    type: String
+    description: (Required) ARN of the IAM role SSM Automation assumes to perform the remediation.
+    allowedPattern: ^arn:aws[a-z0-9-]*:iam::[0-9]{12}:role/[\w+=,.@/-]+$
+
+outputs:
+  - AttachMissingTags.OutputPayload
+
+mainSteps:
+  - name: AttachMissingTags
+    action: aws:executeScript
+    description: Detect the service from the resource id prefix, then attach only the missing tags.
+    timeoutSeconds: 300
+    onFailure: Abort
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        ResourceId: '{{ ResourceId }}'
+        DefaultTagsJson: '{{ DefaultTagsJson }}'
+      Script: |
+        import json
+
+        import boto3
+
+
+        def _existing_tags(resource_id):
+            """Return (current tags, (service, tag target)) for the resource.
+
+            The tag target is whatever identifier the service's tagging API
+            expects: the raw id for EC2/EFS, the instance ARN for RDS (Config
+            reports RDS instances by DbiResourceId, which must be resolved).
+            """
+            if resource_id.startswith("vol-"):
+                ec2 = boto3.client("ec2")
+                tags = ec2.describe_tags(
+                    Filters=[{"Name": "resource-id", "Values": [resource_id]}]
+                )["Tags"]
+                return {t["Key"]: t["Value"] for t in tags}, ("ec2", resource_id)
+
+            if resource_id.startswith("fs-"):
+                efs = boto3.client("efs")
+                tags = efs.list_tags_for_resource(ResourceId=resource_id)["Tags"]
+                return {t["Key"]: t["Value"] for t in tags}, ("efs", resource_id)
+
+            rds = boto3.client("rds")
+            instances = rds.describe_db_instances(
+                Filters=[{"Name": "dbi-resource-id", "Values": [resource_id]}]
+            )["DBInstances"]
+            if not instances:
+                raise RuntimeError(f"No RDS instance found with DbiResourceId {resource_id}")
+            arn = instances[0]["DBInstanceArn"]
+            tags = rds.list_tags_for_resource(ResourceName=arn)["TagList"]
+            return {t["Key"]: t["Value"] for t in tags}, ("rds", arn)
+
+
+        def _attach(service, target, tags):
+            """Attach the given tags using the service-specific tagging API."""
+            tag_list = [{"Key": key, "Value": value} for key, value in sorted(tags.items())]
+            if service == "ec2":
+                boto3.client("ec2").create_tags(Resources=[target], Tags=tag_list)
+            elif service == "efs":
+                boto3.client("efs").tag_resource(ResourceId=target, Tags=tag_list)
+            else:
+                boto3.client("rds").add_tags_to_resource(ResourceName=target, Tags=tag_list)
+
+
+        def handler(event, context):
+            """Attach every default tag the resource is missing."""
+            resource_id = event["ResourceId"]
+            defaults = json.loads(event["DefaultTagsJson"])
+            if not isinstance(defaults, dict) or not defaults:
+                raise ValueError(
+                    "DefaultTagsJson must be a non-empty JSON object of tag keys to values"
+                )
+
+            existing, (service, target) = _existing_tags(resource_id)
+            missing = {
+                key: str(value) for key, value in defaults.items() if key not in existing
+            }
+            if missing:
+                _attach(service, target, missing)
+
+            return {
+                "ResourceId": resource_id,
+                "Service": service,
+                "TagsAttached": missing,
+                "TagsAlreadyPresent": sorted(set(defaults) & set(existing)),
+            }

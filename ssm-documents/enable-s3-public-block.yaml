@@ -1,0 +1,83 @@
+# enable-s3-public-block — SSM Automation runbook
+#
+# Invoked automatically by AWS Config remediation when the s3-public-blocks
+# custom rule marks a bucket NON_COMPLIANT. Applies all four bucket-level
+# public access block settings, then verifies the configuration stuck.
+#
+# Registered by terraform/remediation-configurations.tf as
+# <project>-enable-s3-public-block.
+schemaVersion: '0.3'
+description: >-
+  Enable all four S3 public access block settings (BlockPublicAcls,
+  IgnorePublicAcls, BlockPublicPolicy, RestrictPublicBuckets) on a bucket and
+  verify the result. Safe to run repeatedly - the underlying API call is
+  idempotent.
+assumeRole: '{{ AutomationAssumeRole }}'
+
+parameters:
+  BucketName:
+    type: String
+    description: (Required) Name of the bucket to remediate. Supplied by AWS Config as the non-compliant resource id.
+    allowedPattern: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+  AutomationAssumeRole:
+    type: String
+    description: (Required) ARN of the IAM role SSM Automation assumes to perform the remediation.
+    allowedPattern: ^arn:aws[a-z0-9-]*:iam::[0-9]{12}:role/[\w+=,.@/-]+$
+
+outputs:
+  - VerifyPublicAccessBlock.OutputPayload
+
+mainSteps:
+  - name: EnablePublicAccessBlock
+    action: aws:executeAwsApi
+    description: Apply all four public access block settings to the bucket.
+    timeoutSeconds: 60
+    onFailure: Abort
+    inputs:
+      Service: s3
+      Api: PutPublicAccessBlock
+      Bucket: '{{ BucketName }}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+  - name: VerifyPublicAccessBlock
+    action: aws:executeScript
+    description: Read the configuration back and fail unless all four settings are enabled.
+    timeoutSeconds: 120
+    onFailure: Abort
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        BucketName: '{{ BucketName }}'
+      Script: |
+        import boto3
+
+        REQUIRED = (
+            "BlockPublicAcls",
+            "IgnorePublicAcls",
+            "BlockPublicPolicy",
+            "RestrictPublicBuckets",
+        )
+
+
+        def handler(event, context):
+            """Assert every public access block flag is now enabled."""
+            bucket = event["BucketName"]
+            config = boto3.client("s3").get_public_access_block(Bucket=bucket)[
+                "PublicAccessBlockConfiguration"
+            ]
+            disabled = [flag for flag in REQUIRED if not config.get(flag)]
+            if disabled:
+                raise RuntimeError(
+                    f"Public access block on {bucket} still has disabled settings: {disabled}"
+                )
+            return {
+                "Bucket": bucket,
+                "PublicAccessBlock": config,
+                "Status": "COMPLIANT",
+            }

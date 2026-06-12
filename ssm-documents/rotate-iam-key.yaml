@@ -1,0 +1,124 @@
+# rotate-iam-key — SSM Automation runbook
+#
+# Invoked automatically by AWS Config remediation when the iam-key-rotation
+# custom rule marks an IAM user NON_COMPLIANT. Deactivates (or, when Mode is
+# Delete, removes) the user's access keys older than MaxKeyAgeDays.
+#
+# This runbook deliberately does NOT mint a replacement key: creating
+# credentials inside an automation would expose the new secret in execution
+# output and CloudTrail-adjacent tooling. Issue the replacement through your
+# normal secrets workflow, then delete the inactive key.
+#
+# Registered by terraform/remediation-configurations.tf as
+# <project>-rotate-iam-key.
+schemaVersion: '0.3'
+description: >-
+  Deactivate or delete IAM access keys older than MaxKeyAgeDays for a single
+  user. Accepts either an IAM UserId (AIDA...) as reported by AWS Config or a
+  plain user name. Replacement keys are intentionally not created here.
+assumeRole: '{{ AutomationAssumeRole }}'
+
+parameters:
+  IamUserIdentifier:
+    type: String
+    description: (Required) IAM UserId (AIDA...) as reported by AWS Config, or a plain IAM user name.
+    allowedPattern: ^[\w+=,.@-]{1,128}$
+  MaxKeyAgeDays:
+    type: String
+    description: (Optional) Age threshold in days. Keys older than this are remediated.
+    default: '90'
+    allowedPattern: ^[0-9]{1,4}$
+  Mode:
+    type: String
+    description: (Optional) Deactivate marks aged keys Inactive (reversible). Delete permanently removes them.
+    default: Deactivate
+    allowedValues:
+      - Deactivate
+      - Delete
+  AutomationAssumeRole:
+    type: String
+    description: (Required) ARN of the IAM role SSM Automation assumes to perform the remediation.
+    allowedPattern: ^arn:aws[a-z0-9-]*:iam::[0-9]{12}:role/[\w+=,.@/-]+$
+
+outputs:
+  - RemediateAccessKeys.OutputPayload
+
+mainSteps:
+  - name: RemediateAccessKeys
+    action: aws:executeScript
+    description: Resolve the user, then deactivate or delete every key past the age threshold.
+    timeoutSeconds: 300
+    onFailure: Abort
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        IamUserIdentifier: '{{ IamUserIdentifier }}'
+        MaxKeyAgeDays: '{{ MaxKeyAgeDays }}'
+        Mode: '{{ Mode }}'
+      Script: |
+        import re
+        from datetime import datetime, timezone
+
+        import boto3
+
+        iam = boto3.client("iam")
+
+
+        def _resolve_user_name(identifier):
+            """Map an AWS Config resource id (IAM UserId) to a user name.
+
+            Config reports IAM users by UserId (AIDA...), but the access-key
+            APIs take user names. Identifiers that do not look like a UserId
+            are treated as user names and validated with GetUser.
+            """
+            if re.fullmatch(r"AIDA[A-Z0-9]+", identifier):
+                paginator = iam.get_paginator("list_users")
+                for page in paginator.paginate():
+                    for user in page["Users"]:
+                        if user["UserId"] == identifier:
+                            return user["UserName"]
+                raise RuntimeError(f"No IAM user found with UserId {identifier}")
+            iam.get_user(UserName=identifier)  # raises if the user does not exist
+            return identifier
+
+
+        def handler(event, context):
+            """Deactivate or delete the user's access keys past the threshold."""
+            user_name = _resolve_user_name(event["IamUserIdentifier"])
+            max_age_days = int(event["MaxKeyAgeDays"])
+            mode = event["Mode"]
+            now = datetime.now(timezone.utc)
+
+            remediated, skipped = [], []
+            keys = iam.list_access_keys(UserName=user_name)["AccessKeyMetadata"]
+            for key in keys:
+                key_id = key["AccessKeyId"]
+                age_days = (now - key["CreateDate"]).days
+                if age_days <= max_age_days:
+                    skipped.append(
+                        {"AccessKeyId": key_id, "AgeDays": age_days, "Reason": "within threshold"}
+                    )
+                    continue
+                if mode == "Delete":
+                    iam.delete_access_key(UserName=user_name, AccessKeyId=key_id)
+                elif key["Status"] == "Active":
+                    iam.update_access_key(
+                        UserName=user_name, AccessKeyId=key_id, Status="Inactive"
+                    )
+                else:
+                    skipped.append(
+                        {"AccessKeyId": key_id, "AgeDays": age_days, "Reason": "already inactive"}
+                    )
+                    continue
+                remediated.append(
+                    {"AccessKeyId": key_id, "AgeDays": age_days, "Action": mode}
+                )
+
+            return {
+                "UserName": user_name,
+                "Remediated": remediated,
+                "Skipped": skipped,
+                "Note": "Replacement keys must be issued via your secrets workflow.",
+            }

@@ -17,3 +17,13 @@ output "cis_rule_names" {
   description = "Names of every CIS-aligned managed Config rule deployed by this stack."
   value       = sort([for rule in aws_config_config_rule.cis : rule.name])
 }
+
+output "remediation_role_arn" {
+  description = "ARN of the IAM role the SSM Automation remediation runbooks assume."
+  value       = aws_iam_role.remediation.arn
+}
+
+output "remediation_document_names" {
+  description = "Registered SSM Automation document names, keyed by runbook."
+  value       = { for key, doc in aws_ssm_document.remediation : key => doc.name }
+}
