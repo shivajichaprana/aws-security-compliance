@@ -1,0 +1,19 @@
+# yamllint configuration for the SSM Automation documents.
+# SSM documents legitimately use long single-line descriptions and quoted
+# schema versions, so a handful of stylistic rules are relaxed while real
+# structural problems still fail the lint.
+extends: default
+
+rules:
+  document-start: disable
+  line-length:
+    max: 200
+    level: warning
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  indentation:
+    spaces: 2
+    indent-sequences: true
