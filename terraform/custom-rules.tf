@@ -237,7 +237,7 @@ resource "aws_lambda_function" "config_rule" {
   }
 
   # The execution role must be able to write logs before first invocation,
-  # and the log group must exist so the retention policy applies from day one.
+  # and the log group must exist so the retention policy applies from the outset.
   depends_on = [
     aws_iam_role_policy_attachment.config_rules_logs,
     aws_iam_role_policy.config_rules,
