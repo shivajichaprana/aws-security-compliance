@@ -183,7 +183,7 @@ resource "aws_quicksight_data_set" "config_scorecard" {
     }
   }
 
-  permission {
+  permissions {
     principal = var.quicksight_principal_arn
     actions   = local.quicksight_data_set_actions
   }
@@ -236,7 +236,7 @@ resource "aws_quicksight_data_set" "securityhub_severity" {
     }
   }
 
-  permission {
+  permissions {
     principal = var.quicksight_principal_arn
     actions   = local.quicksight_data_set_actions
   }
@@ -428,7 +428,7 @@ resource "aws_quicksight_dashboard" "compliance" {
     }
   }
 
-  permission {
+  permissions {
     principal = var.quicksight_principal_arn
     actions   = local.quicksight_dashboard_actions
   }
