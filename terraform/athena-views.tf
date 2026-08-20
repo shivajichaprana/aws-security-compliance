@@ -353,8 +353,8 @@ resource "aws_glue_catalog_table" "config_rule_compliance" {
   table_type    = "EXTERNAL_TABLE"
 
   parameters = {
-    EXTERNAL                      = "TRUE"
-    classification                = "json"
+    EXTERNAL       = "TRUE"
+    classification = "json"
     "projection.enabled"          = "true"
     "projection.dt.type"          = "date"
     "projection.dt.format"        = "yyyy-MM-dd"
@@ -427,8 +427,8 @@ resource "aws_glue_catalog_table" "securityhub_finding_summary" {
   table_type    = "EXTERNAL_TABLE"
 
   parameters = {
-    EXTERNAL                      = "TRUE"
-    classification                = "json"
+    EXTERNAL       = "TRUE"
+    classification = "json"
     "projection.enabled"          = "true"
     "projection.dt.type"          = "date"
     "projection.dt.format"        = "yyyy-MM-dd"

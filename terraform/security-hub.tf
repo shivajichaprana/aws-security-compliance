@@ -195,5 +195,5 @@ output "securityhub_subscribed_standards" {
 
 output "securityhub_finding_aggregator_arn" {
   description = "ARN of the cross-Region Security Hub finding aggregator."
-  value       = aws_securityhub_finding_aggregator.this.arn
+  value       = aws_securityhub_finding_aggregator.this.id
 }

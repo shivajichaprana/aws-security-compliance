@@ -116,7 +116,7 @@ resource "aws_quicksight_data_source" "athena" {
     disable_ssl = false
   }
 
-  permissions {
+  permission {
     principal = var.quicksight_principal_arn
     actions   = local.quicksight_data_source_actions
   }
@@ -183,7 +183,7 @@ resource "aws_quicksight_data_set" "config_scorecard" {
     }
   }
 
-  permissions {
+  permission {
     principal = var.quicksight_principal_arn
     actions   = local.quicksight_data_set_actions
   }
@@ -236,7 +236,7 @@ resource "aws_quicksight_data_set" "securityhub_severity" {
     }
   }
 
-  permissions {
+  permission {
     principal = var.quicksight_principal_arn
     actions   = local.quicksight_data_set_actions
   }
@@ -428,7 +428,7 @@ resource "aws_quicksight_dashboard" "compliance" {
     }
   }
 
-  permissions {
+  permission {
     principal = var.quicksight_principal_arn
     actions   = local.quicksight_dashboard_actions
   }
